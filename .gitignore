@@ -4,3 +4,4 @@
 *.dyn_o
 /ghci-out
 /dist
+/.stack-work/
