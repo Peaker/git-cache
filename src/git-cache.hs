@@ -26,9 +26,11 @@ import           System.Directory ( createDirectoryIfMissing
                                   )
 import           System.Environment (getArgs)
 import           System.FilePath ((</>), (<.>), takeDirectory)
+import qualified System.IO as IO
 import qualified System.IO.Error as Err
 import qualified System.Posix.Files as Posix
 import           System.Process (callProcess, readProcess)
+import           System.ProgressBar.ByteString (fileReadProgressWriter)
 
 callGit :: [String] -> IO ()
 callGit = callProcess "git"
@@ -131,8 +133,8 @@ copyFileMetadata src dest =
         Posix.setFileTimesHiRes dest (Posix.accessTimeHiRes st) (Posix.modificationTimeHiRes st)
 
 -- | copyFileWithMetadata but also create output dir as needed, or delete if needd
-copy :: (ByteString -> ByteString) -> FilePath -> FilePath -> IO ()
-copy process srcPath destPath =
+copy :: String -> (ByteString -> ByteString) -> FilePath -> FilePath -> IO ()
+copy prefix process srcPath destPath =
     do
         srcExists <- doesFileExist srcPath
         destExists <- doesFileExist destPath
@@ -140,7 +142,7 @@ copy process srcPath destPath =
             then removeFile destPath
             else do
                 createDirectoryIfMissing True (takeDirectory destPath)
-                BS.readFile srcPath
+                fileReadProgressWriter srcPath IO.stdout 60 (\_ _ -> prefix) (\_ _ -> "")
                     <&> process
                     >>= BS.writeFile destPath
                 copyFileMetadata srcPath destPath
@@ -157,7 +159,7 @@ save dbPath preTreeHash m act =
         for_ (outputFiles m) $ \outputFile ->
             do
                 let destPath = cachePath dbPath preTreeHash </> "xz" </> outputFile
-                copy compress outputFile destPath
+                copy "Compressing file..." compress outputFile destPath
         act
     where
         cleanOnError = (`E.onException` cleanup)
@@ -182,7 +184,7 @@ restore dbPath preTreeHash m =
         for_ (outputFiles m) $ \outputFile ->
             do
                 putStrLn $ "    " ++ outputFile
-                copy process (path </> outputFile) outputFile
+                copy "Decompressing file" process (path </> outputFile) outputFile
     where
         compressedPath = cachePath dbPath preTreeHash </> "xz"
 
