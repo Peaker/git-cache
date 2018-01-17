@@ -21,7 +21,7 @@ import           Data.Text (Text)
 import qualified Data.Text as Text
 import           System.Directory ( createDirectoryIfMissing
                                   , removePathForcibly
-                                  , doesFileExist, doesDirectoryExist
+                                  , doesDirectoryExist
                                   , removeFile
                                   )
 import           System.Environment (getArgs)
