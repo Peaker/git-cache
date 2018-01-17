@@ -136,16 +136,21 @@ copyFileMetadata src dest =
 copy :: String -> (ByteString -> ByteString) -> FilePath -> FilePath -> IO ()
 copy prefix process srcPath destPath =
     do
-        srcExists <- doesFileExist srcPath
-        destExists <- doesFileExist destPath
-        if not srcExists && destExists
-            then removeFile destPath
-            else do
-                createDirectoryIfMissing True (takeDirectory destPath)
-                fileReadProgressWriter srcPath IO.stdout 60 (\_ _ -> prefix) (\_ _ -> "")
-                    <&> process
-                    >>= BS.writeFile destPath
-                copyFileMetadata srcPath destPath
+        srcSt <- tryGetFileStatus srcPath
+        destSt <- tryGetFileStatus destPath
+        case (srcSt, destSt) of
+            (Nothing, Nothing) -> return ()
+            (Nothing, Just _) -> removeFile destPath
+            (Just src, Just dest)
+                | Posix.modificationTimeHiRes src ==
+                  Posix.modificationTimeHiRes dest -> return ()
+            _ ->
+                do
+                    createDirectoryIfMissing True (takeDirectory destPath)
+                    fileReadProgressWriter srcPath IO.stdout 60 (\_ _ -> prefix) (\_ _ -> "")
+                        <&> process
+                        >>= BS.writeFile destPath
+                    copyFileMetadata srcPath destPath
 
 save :: FilePath -> String -> Manifest -> IO a -> IO a
 save dbPath preTreeHash m act =
