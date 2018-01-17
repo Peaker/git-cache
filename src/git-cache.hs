@@ -5,6 +5,7 @@ module Main
     ( main
     ) where
 
+import           Codec.Compression.Lzma (compress, decompress)
 import qualified Control.Exception as E
 import           Control.Lens hiding ((<.>))
 import           Control.Monad (unless)
@@ -12,15 +13,15 @@ import           Data.Aeson (defaultOptions, (.:))
 import qualified Data.Aeson as Aeson
 import           Data.Aeson.Lens
 import           Data.Aeson.TH (deriveJSON)
+import           Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as BS
 import           Data.Foldable (for_)
 import           Data.List.Split (splitOn)
 import           Data.Text (Text)
 import qualified Data.Text as Text
 import           System.Directory ( createDirectoryIfMissing
-                                  , copyFileWithMetadata
                                   , removePathForcibly
-                                  , doesFileExist
+                                  , doesFileExist, doesDirectoryExist
                                   , removeFile
                                   )
 import           System.Environment (getArgs)
@@ -122,9 +123,16 @@ manifestPath dbPath preTreeHash = cachePath dbPath preTreeHash <.> "manifest"
 suffixMsg :: String -> String
 suffixMsg hash = " (on tree " ++ hash ++ ")"
 
+copyFileMetadata :: FilePath -> FilePath -> IO ()
+copyFileMetadata src dest =
+    do
+        st <- Posix.getFileStatus src
+        Posix.setFileMode dest (Posix.fileMode st)
+        Posix.setFileTimesHiRes dest (Posix.accessTimeHiRes st) (Posix.modificationTimeHiRes st)
+
 -- | copyFileWithMetadata but also create output dir as needed, or delete if needd
-lenientCopy :: FilePath -> FilePath -> IO ()
-lenientCopy srcPath destPath =
+copy :: (ByteString -> ByteString) -> FilePath -> FilePath -> IO ()
+copy process srcPath destPath =
     do
         srcExists <- doesFileExist srcPath
         destExists <- doesFileExist destPath
@@ -132,7 +140,10 @@ lenientCopy srcPath destPath =
             then removeFile destPath
             else do
                 createDirectoryIfMissing True (takeDirectory destPath)
-                copyFileWithMetadata srcPath destPath
+                BS.readFile srcPath
+                    <&> process
+                    >>= BS.writeFile destPath
+                copyFileMetadata srcPath destPath
 
 save :: FilePath -> String -> Manifest -> IO a -> IO a
 save dbPath preTreeHash m act =
@@ -144,7 +155,9 @@ save dbPath preTreeHash m act =
         BS.writeFile (manifestPath dbPath preTreeHash) (Aeson.encode m)
         -- copy the output files
         for_ (outputFiles m) $ \outputFile ->
-            lenientCopy outputFile (cachePath dbPath preTreeHash </> outputFile)
+            do
+                let destPath = cachePath dbPath preTreeHash </> "xz" </> outputFile
+                copy compress outputFile destPath
         act
     where
         cleanOnError = (`E.onException` cleanup)
@@ -160,11 +173,18 @@ save dbPath preTreeHash m act =
 restore :: FilePath -> String -> Manifest -> IO ()
 restore dbPath preTreeHash m =
     do
-        putStrLn $ "Restoring" ++ suffixMsg preTreeHash ++ ":"
+        compressed <- doesDirectoryExist compressedPath
+        let (path, process)
+                | compressed = (compressedPath, decompress)
+                | otherwise = (cachePath dbPath preTreeHash, id)
+        putStrLn $ "Restoring" ++ suffixMsg preTreeHash ++ ": (compressed=" ++
+            show compressed ++ ", at " ++ path ++ ")"
         for_ (outputFiles m) $ \outputFile ->
             do
                 putStrLn $ "    " ++ outputFile
-                lenientCopy (cachePath dbPath preTreeHash </> outputFile) outputFile
+                copy process (path </> outputFile) outputFile
+    where
+        compressedPath = cachePath dbPath preTreeHash </> "xz"
 
 build :: FilePath -> String -> Manifest -> IO ()
 build dbPath preTreeHash m =
