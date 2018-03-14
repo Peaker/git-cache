@@ -13,25 +13,20 @@ import           Data.Aeson (defaultOptions, (.:))
 import qualified Data.Aeson as Aeson
 import           Data.Aeson.Lens
 import           Data.Aeson.TH (deriveJSON)
-import           Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as BS
 import           Data.Foldable (for_)
 import           Data.Text (Text)
 import qualified Data.Text as Text
+import qualified Files
 import qualified Git
 import qualified Process
 import           System.Directory ( createDirectoryIfMissing
                                   , removePathForcibly
                                   , doesDirectoryExist
-                                  , removeFile
                                   )
 import           System.Environment (getArgs)
-import           System.FilePath ((</>), (<.>), takeDirectory)
-import qualified System.IO as IO
-import qualified System.IO.Error as Err
+import           System.FilePath ((</>), (<.>))
 import qualified System.Posix.Files as Posix
-
-import           System.ProgressBar.ByteString (fileReadProgressWriter)
 
 data Manifest = Manifest
     { outputFiles :: [FilePath]
@@ -54,30 +49,14 @@ instance Aeson.FromJSON Spec where
             m <- Aeson.parseJSON val
             Aeson.withObject "spec" ?? val $ \o -> Spec m <$> o .: "db"
 
-handleErrorPred :: (Err.IOErrorType -> Bool) -> IO a -> IO a -> IO a
-handleErrorPred predicate handler =
-    E.handle $ \e ->
-    if predicate (Err.ioeGetErrorType e)
-    then handler
-    else E.throwIO e
-
-handleDoesNotExist :: IO a -> IO a -> IO a
-handleDoesNotExist = handleErrorPred Err.isDoesNotExistErrorType
-
-maybeMissingFile :: IO a -> IO (Maybe a)
-maybeMissingFile act = Just <$> act & handleDoesNotExist (pure Nothing)
-
 readJSON :: Aeson.FromJSON a => FilePath -> IO a
 readJSON path =
     do
         bs <- BS.readFile path
         Aeson.eitherDecode' bs & either (fail . show) pure
 
-tryGetFileStatus :: FilePath -> IO (Maybe Posix.FileStatus)
-tryGetFileStatus = maybeMissingFile . Posix.getFileStatus
-
 tryParseJSON :: Aeson.FromJSON a => FilePath -> IO (Maybe a)
-tryParseJSON = maybeMissingFile . readJSON
+tryParseJSON = Files.maybeMissing . readJSON
 
 cachePath :: FilePath -> String -> FilePath
 cachePath dbPath hash = dbPath </> hash
@@ -87,33 +66,6 @@ manifestPath dbPath preTreeHash = cachePath dbPath preTreeHash <.> "manifest"
 
 suffixMsg :: String -> String
 suffixMsg hash = " (on tree " ++ hash ++ ")"
-
-copyFileMetadata :: FilePath -> FilePath -> IO ()
-copyFileMetadata src dest =
-    do
-        st <- Posix.getFileStatus src
-        Posix.setFileMode dest (Posix.fileMode st)
-        Posix.setFileTimesHiRes dest (Posix.accessTimeHiRes st) (Posix.modificationTimeHiRes st)
-
--- | copyFileWithMetadata but also create output dir as needed, or delete if needd
-copy :: String -> (ByteString -> ByteString) -> FilePath -> FilePath -> IO ()
-copy prefix process srcPath destPath =
-    do
-        srcSt <- tryGetFileStatus srcPath
-        destSt <- tryGetFileStatus destPath
-        case (srcSt, destSt) of
-            (Nothing, Nothing) -> return ()
-            (Nothing, Just _) -> removeFile destPath
-            (Just src, Just dest)
-                | Posix.modificationTimeHiRes src ==
-                  Posix.modificationTimeHiRes dest -> return ()
-            _ ->
-                do
-                    createDirectoryIfMissing True (takeDirectory destPath)
-                    fileReadProgressWriter srcPath IO.stdout 60 (\_ _ -> prefix) (\_ _ -> "")
-                        <&> process
-                        >>= BS.writeFile destPath
-                    copyFileMetadata srcPath destPath
 
 save :: FilePath -> String -> Manifest -> IO a -> IO a
 save dbPath preTreeHash m act =
@@ -127,7 +79,7 @@ save dbPath preTreeHash m act =
         for_ (outputFiles m) $ \outputFile ->
             do
                 let destPath = cachePath dbPath preTreeHash </> "xz" </> outputFile
-                copy "Compressing file..." compress outputFile destPath
+                Files.copyWith "Compressing file..." compress outputFile destPath
         act
     where
         cleanOnError = (`E.onException` cleanup)
@@ -152,7 +104,7 @@ restore dbPath preTreeHash m =
         for_ (outputFiles m) $ \outputFile ->
             do
                 putStrLn $ "    " ++ outputFile
-                copy "Decompressing file" process (path </> outputFile) outputFile
+                Files.copyWith "Decompressing file" process (path </> outputFile) outputFile
     where
         compressedPath = cachePath dbPath preTreeHash </> "xz"
 
@@ -179,7 +131,7 @@ build dbPath preTreeHash m =
                     fail "Concurrent change and run"
     where
         getOutputMTimes =
-            traverse tryGetFileStatus (outputFiles m)
+            traverse Files.tryGetStatus (outputFiles m)
             <&> mapped . _Just %~ Posix.modificationTimeHiRes
 
 run :: FilePath -> IO ()
