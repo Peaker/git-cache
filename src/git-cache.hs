@@ -1,5 +1,4 @@
-{-# LANGUAGE OverloadedStrings, NoMonomorphismRestriction #-}
-{-# LANGUAGE TemplateHaskell, LambdaCase #-}
+{-# LANGUAGE OverloadedStrings, NoMonomorphismRestriction, LambdaCase #-}
 
 module Main
     ( main
@@ -9,17 +8,14 @@ import           Codec.Compression.Lzma (compress, decompress)
 import qualified Control.Exception as E
 import           Control.Lens hiding ((<.>))
 import           Control.Monad (unless)
-import           Data.Aeson (defaultOptions, (.:))
 import qualified Data.Aeson as Aeson
-import           Data.Aeson.Lens
-import           Data.Aeson.TH (deriveJSON)
 import qualified Data.ByteString.Lazy as BS
 import           Data.Foldable (for_)
-import           Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Files
 import qualified Git
 import qualified Process
+import           Spec (Manifest(..), Spec(..))
 import           System.Directory ( createDirectoryIfMissing
                                   , removePathForcibly
                                   , doesDirectoryExist
@@ -27,27 +23,6 @@ import           System.Directory ( createDirectoryIfMissing
 import           System.Environment (getArgs)
 import           System.FilePath ((</>), (<.>))
 import qualified System.Posix.Files as Posix
-
-data Manifest = Manifest
-    { outputFiles :: [FilePath]
-    , cmd :: Text
-    , cmdArgs :: [Text]
-    } deriving (Eq, Show)
-deriveJSON defaultOptions ''Manifest
-
-data Spec = Spec
-    { manifest :: Manifest
-    , db :: FilePath
-    } deriving Show
-instance Aeson.ToJSON Spec where
-    toJSON (Spec m d) =
-        Aeson.toJSON m
-        & _Object . at "db" ?~ _String # Text.pack d
-instance Aeson.FromJSON Spec where
-    parseJSON val =
-        do
-            m <- Aeson.parseJSON val
-            Aeson.withObject "spec" ?? val $ \o -> Spec m <$> o .: "db"
 
 readJSON :: Aeson.FromJSON a => FilePath -> IO a
 readJSON path =

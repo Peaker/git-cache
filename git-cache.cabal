@@ -35,6 +35,7 @@ executable git-cached-exec
   other-modules:       Git
                      , Process
                      , Files
+                     , Spec
   ghc-options:         -O2 -Wall -Widentities -Wmissing-home-modules -Wincomplete-patterns -Wnoncanonical-monad-instances -Wsemigroup -Wincomplete-record-updates -Wredundant-constraints
   default-language:    Haskell2010
 
