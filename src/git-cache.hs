@@ -16,90 +16,22 @@ import           Data.Aeson.TH (deriveJSON)
 import           Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as BS
 import           Data.Foldable (for_)
-import           Data.List.Split (splitOn)
 import           Data.Text (Text)
 import qualified Data.Text as Text
+import qualified Git
+import qualified Process
 import           System.Directory ( createDirectoryIfMissing
                                   , removePathForcibly
                                   , doesDirectoryExist
                                   , removeFile
                                   )
 import           System.Environment (getArgs)
-import           System.Exit (ExitCode(..))
 import           System.FilePath ((</>), (<.>), takeDirectory)
 import qualified System.IO as IO
 import qualified System.IO.Error as Err
 import qualified System.Posix.Files as Posix
-import           System.Process (proc, createProcess, waitForProcess, readProcess, delegate_ctlc)
+
 import           System.ProgressBar.ByteString (fileReadProgressWriter)
-
-callProcess :: FilePath -> [String] -> IO ExitCode
-callProcess exe args =
-    do
-        (_, _, _, p) <- createProcess (proc exe args) { delegate_ctlc = True }
-        waitForProcess p
-
-checkProcess :: FilePath -> [String] -> IO ()
-checkProcess exe args =
-    callProcess exe args
-    >>= \case
-    ExitSuccess -> return ()
-    other -> fail $ unwords (exe:args) ++ " failed: " ++ show other
-
-callGit :: [String] -> IO ExitCode
-callGit = callProcess "git"
-
-callGitCheck :: [String] -> IO ()
-callGitCheck = checkProcess "git"
-
-
-readGit :: [String] -> IO String
-readGit args = readProcess "git" args ""
-
-commit :: String -> [String] -> IO ExitCode
-commit msg args = callGit (["commit", "-m", msg] ++ args)
-
-uncommit :: [String] -> IO ()
-uncommit args = callGitCheck (["reset", "HEAD^"] ++ args)
-
-gitStatus :: IO String
-gitStatus = readGit ["status", "--porcelain", "-z"]
-
-verifyNoUntracked :: IO ()
-verifyNoUntracked =
-    do
-        untrackedFiles <-
-            gitStatus
-            <&> splitOn "\NUL"
-            <&> filter (("?? "==) . take 3)
-            <&> map (drop 3)
-        unless (null untrackedFiles) $
-            fail ("Have untracked files: " ++ show untrackedFiles)
-
-withCommit :: String -> [String] -> [String] -> IO a -> IO a
-withCommit msg args uncommitArgs body =
-    E.mask $ \restore ->
-    commit msg args
-    >>= \case
-    ExitSuccess ->
-        restore body `E.finally` uncommit uncommitArgs
-    ExitFailure 1 ->
-        -- cannot commit, possibly due to nothing to commit,
-        -- proceed without uncommitting
-        restore body
-    other -> fail $ "git commit " ++ unwords ("-m":msg:args) ++ " failed: " ++ show other
-
-getTreeHash :: IO String
-getTreeHash =
-    do
-        verifyNoUntracked
-        withCommit "STAGING" [] ["--soft"] $
-            withCommit "WORKINGTREE" ["-a"] [] $
-            do
-                ["tree", treehash] <-
-                    readGit ["cat-file", "-p", "HEAD"]
-                    <&> lines <&> head <&> words
-                pure treehash
 
 data Manifest = Manifest
     { outputFiles :: [FilePath]
@@ -231,7 +163,7 @@ build dbPath preTreeHash m =
         putStrLn $
             "Executing " ++ unwords (cmd m : cmdArgs m <&> Text.unpack)
             ++ suffixMsg preTreeHash
-        checkProcess (cmd m & Text.unpack) (cmdArgs m <&> Text.unpack)
+        Process.check (cmd m & Text.unpack) (cmdArgs m <&> Text.unpack)
         postMTimes <- getOutputMTimes
         for_ (zip3 (outputFiles m) preMTimes postMTimes) $
             \case
@@ -242,7 +174,7 @@ build dbPath preTreeHash m =
             _ -> pure ()
         save dbPath preTreeHash m $
             do
-                postTreeHash <- getTreeHash
+                postTreeHash <- Git.getTreeHash
                 unless (preTreeHash == postTreeHash) $
                     fail "Concurrent change and run"
     where
@@ -256,7 +188,7 @@ run specFile =
         spec <- readJSON specFile
         createDirectoryIfMissing True (db spec)
         let m = manifest spec
-        preTreeHash <- getTreeHash
+        preTreeHash <- Git.getTreeHash
         mOldManifest <- tryParseJSON (manifestPath (db spec) preTreeHash)
         action <-
             case mOldManifest of
