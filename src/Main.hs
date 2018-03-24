@@ -6,6 +6,7 @@ module Main
 
 import           Codec.Compression.Lzma (compress, decompress)
 import qualified Control.Exception as E
+import qualified Control.Lens as Lens
 import           Control.Lens hiding ((<.>))
 import           Control.Monad (unless)
 import qualified Data.Aeson as Aeson
@@ -21,7 +22,9 @@ import           System.Directory ( createDirectoryIfMissing
                                   , removePathForcibly
                                   , doesDirectoryExist
                                   )
+import           System.Exit (ExitCode(..))
 import           System.FilePath ((</>), (<.>))
+import qualified System.IO as IO
 import qualified System.Posix.Files as Posix
 
 readJSON :: Aeson.FromJSON a => FilePath -> IO a
@@ -37,7 +40,7 @@ cachePath :: FilePath -> String -> FilePath
 cachePath dbPath hash = dbPath </> hash
 
 manifestPath :: FilePath -> String -> FilePath
-manifestPath dbPath preTreeHash = cachePath dbPath preTreeHash <.> "manifest"
+manifestPath dbPath treeHash = cachePath dbPath treeHash <.> "manifest"
 
 suffixMsg :: String -> String
 suffixMsg hash = " (on tree " ++ hash ++ ")"
@@ -68,13 +71,13 @@ save dbPath preTreeHash m act =
                             removePathForcibly path
 
 restore :: Spec -> String -> IO ()
-restore spec preTreeHash =
+restore spec treeHash =
     do
         compressed <- doesDirectoryExist compressedPath
         let (path, process)
                 | compressed = (compressedPath, decompress)
-                | otherwise = (cachePath dbPath preTreeHash, id)
-        putStrLn $ "Restoring" ++ suffixMsg preTreeHash ++ ": (compressed=" ++
+                | otherwise = (cachePath dbPath treeHash, id)
+        putStrLn $ "Restoring" ++ suffixMsg treeHash ++ ": (compressed=" ++
             show compressed ++ ", at " ++ path ++ ")"
         for_ (outputFiles (manifest spec)) $ \outputFile ->
             do
@@ -82,13 +85,13 @@ restore spec preTreeHash =
                 Files.copyWith "Decompressing file" process (path </> outputFile) outputFile
     where
         dbPath = db spec
-        compressedPath = cachePath dbPath preTreeHash </> "xz"
+        compressedPath = cachePath dbPath treeHash </> "xz"
 
 cleanHeadTreeHash :: IO String
 cleanHeadTreeHash = Git.withCleanSlate (Git.getTreeHash "HEAD")
 
-build :: Spec -> String -> IO ()
-build spec preTreeHash =
+build :: IO String -> Spec -> String -> IO ()
+build getPostTreeHash spec preTreeHash =
     do
         preMTimes <- getOutputMTimes
         putStrLn $
@@ -105,7 +108,7 @@ build spec preTreeHash =
             _ -> pure ()
         save (db spec) preTreeHash m $
             do
-                postTreeHash <- cleanHeadTreeHash
+                postTreeHash <- getPostTreeHash
                 unless (preTreeHash == postTreeHash) $
                     fail "Concurrent change and run"
     where
@@ -114,27 +117,41 @@ build spec preTreeHash =
             traverse Files.tryGetStatus (outputFiles m)
             <&> mapped . _Just %~ Posix.modificationTimeHiRes
 
-run :: FilePath -> IO ()
-run specFile =
+isCached :: Spec -> String -> IO Bool
+isCached spec treeHash =
+    tryParseJSON (manifestPath (db spec) treeHash)
+    >>= Lens._Just %%~ validate
+    <&> maybe False (const True)
+    where
+        validate loadedManifest =
+            unless (manifest spec == loadedManifest) $ fail $
+            "Mismatching spec in git-cache's db" ++ suffixMsg treeHash
+
+bisectFail :: ExitCode
+bisectFail = ExitFailure 125
+
+run :: Opts.Options -> IO ()
+run (Opts.Options specFile (Just (Opts.Load hash))) =
+    do
+        spec <- readJSON specFile
+        treeHash <- Git.getTreeHash hash
+        isCached spec treeHash
+            >>= \case
+            False ->
+                do
+                    IO.hPutStrLn IO.stderr $
+                        "Uncached version requested" ++ suffixMsg treeHash
+                    IO.hFlush IO.stderr
+                    E.throwIO bisectFail
+            True -> restore spec treeHash
+
+run (Opts.Options specFile Nothing) =
     do
         spec <- readJSON specFile
         createDirectoryIfMissing True (db spec)
         preTreeHash <- cleanHeadTreeHash
-        mOldManifest <- tryParseJSON (manifestPath (db spec) preTreeHash)
-        action <-
-            case mOldManifest of
-            Nothing -> pure build
-            Just oldManifest ->
-                do
-                    unless (oldManifest == manifest spec) $
-                        fail $
-                        "Different spec at execution time and at "
-                        ++ "original caching time" ++ suffixMsg preTreeHash
-                    pure restore
-        action spec preTreeHash
+        cached <- isCached spec preTreeHash
+        (if cached then restore else build cleanHeadTreeHash) spec preTreeHash
 
 main :: IO ()
-main =
-    do
-        Opts.Options specFile <- Opts.get
-        run specFile
+main = Opts.get >>= run
