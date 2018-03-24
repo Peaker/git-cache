@@ -31,12 +31,15 @@ executable git-cached-exec
                      , process
                      , lzma
                      , bytestring-progress
+                     , optparse-applicative
   hs-source-dirs:      src
-  other-modules:       Git
+  other-modules:       Files
+                     , Git
+                     , Opts
                      , Process
-                     , Files
                      , Spec
   ghc-options:         -O2 -Wall -Widentities -Wmissing-home-modules -Wincomplete-patterns -Wnoncanonical-monad-instances -Wsemigroup -Wincomplete-record-updates -Wredundant-constraints
+  ghc-prof-options:    -fprof-auto -fprof-cafs -rtsopts
   default-language:    Haskell2010
 
 source-repository head

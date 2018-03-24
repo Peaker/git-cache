@@ -14,13 +14,13 @@ import           Data.Foldable (for_)
 import qualified Data.Text as Text
 import qualified Files
 import qualified Git
+import qualified Opts
 import qualified Process
 import           Spec (Manifest(..), Spec(..))
 import           System.Directory ( createDirectoryIfMissing
                                   , removePathForcibly
                                   , doesDirectoryExist
                                   )
-import           System.Environment (getArgs)
 import           System.FilePath ((</>), (<.>))
 import qualified System.Posix.Files as Posix
 
@@ -132,5 +132,5 @@ run specFile =
 main :: IO ()
 main =
     do
-        [specFile] <- getArgs
+        Opts.Options specFile <- Opts.get
         run specFile
