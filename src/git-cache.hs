@@ -83,6 +83,9 @@ restore dbPath preTreeHash m =
     where
         compressedPath = cachePath dbPath preTreeHash </> "xz"
 
+cleanHeadTreeHash :: IO String
+cleanHeadTreeHash = Git.withCleanSlate (Git.getTreeHash "HEAD")
+
 build :: FilePath -> String -> Manifest -> IO ()
 build dbPath preTreeHash m =
     do
@@ -101,7 +104,7 @@ build dbPath preTreeHash m =
             _ -> pure ()
         save dbPath preTreeHash m $
             do
-                postTreeHash <- Git.getTreeHash
+                postTreeHash <- cleanHeadTreeHash
                 unless (preTreeHash == postTreeHash) $
                     fail "Concurrent change and run"
     where
@@ -115,7 +118,7 @@ run specFile =
         spec <- readJSON specFile
         createDirectoryIfMissing True (db spec)
         let m = manifest spec
-        preTreeHash <- Git.getTreeHash
+        preTreeHash <- cleanHeadTreeHash
         mOldManifest <- tryParseJSON (manifestPath (db spec) preTreeHash)
         action <-
             case mOldManifest of

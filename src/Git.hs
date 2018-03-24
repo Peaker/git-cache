@@ -2,6 +2,7 @@
 {-# LANGUAGE LambdaCase #-}
 module Git
     ( getTreeHash
+    , withCleanSlate
     ) where
 
 import qualified Control.Exception as E
@@ -54,14 +55,17 @@ withCommit msg args uncommitArgs body =
         restore body
     other -> fail $ "git commit " ++ unwords ("-m":msg:args) ++ " failed: " ++ show other
 
-getTreeHash :: IO String
-getTreeHash =
+withCleanSlate :: IO a -> IO a
+withCleanSlate act =
     do
         verifyNoUntracked
         withCommit "STAGING" [] ["--soft"] $
-            withCommit "WORKINGTREE" ["-a"] [] $
-            do
-                ["tree", treehash] <-
-                    readGit ["cat-file", "-p", "HEAD"]
-                    <&> lines <&> head <&> words
-                pure treehash
+            withCommit "WORKINGTREE" ["-a"] [] act
+
+getTreeHash :: String -> IO String
+getTreeHash refspec =
+    do
+        ["tree", treehash] <-
+            readGit ["cat-file", "-p", refspec]
+            <&> lines <&> head <&> words
+        pure treehash
