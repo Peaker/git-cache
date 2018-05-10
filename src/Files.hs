@@ -52,7 +52,7 @@ copyWith prefix process srcPath destPath =
             _ ->
                 do
                     createDirectoryIfMissing True (takeDirectory destPath)
-                    fileReadProgressWriter srcPath IO.stdout 60 (\_ _ -> prefix) (\_ _ -> "")
+                    fileReadProgressWriter srcPath IO.stdout 60 (\_ -> prefix) (\_ -> "")
                         <&> process
                         >>= BS.writeFile destPath
                     copyMetadata srcPath destPath
