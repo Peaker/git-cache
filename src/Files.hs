@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Files
     ( maybeMissing, copyWith, tryGetStatus
     ) where
@@ -6,6 +7,7 @@ import qualified Control.Exception as E
 import           Control.Lens hiding ((<.>))
 import           Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as BS
+import           Data.Text.Lazy (Text)
 import           System.Directory ( createDirectoryIfMissing
                                   , removeFile
                                   )
@@ -13,6 +15,7 @@ import           System.FilePath (takeDirectory)
 import qualified System.IO as IO
 import qualified System.IO.Error as Err
 import qualified System.Posix.Files as Posix
+import qualified System.ProgressBar as ProgressBar
 import           System.ProgressBar.ByteString (fileReadProgressWriter)
 
 tryGetStatus :: FilePath -> IO (Maybe Posix.FileStatus)
@@ -38,7 +41,7 @@ copyMetadata src dest =
         Posix.setFileMode dest (Posix.fileMode st)
         Posix.setFileTimesHiRes dest (Posix.accessTimeHiRes st) (Posix.modificationTimeHiRes st)
 
-copyWith :: String -> (ByteString -> ByteString) -> FilePath -> FilePath -> IO ()
+copyWith :: Text -> (ByteString -> ByteString) -> FilePath -> FilePath -> IO ()
 copyWith prefix process srcPath destPath =
     do
         srcSt <- tryGetStatus srcPath
@@ -52,7 +55,7 @@ copyWith prefix process srcPath destPath =
             _ ->
                 do
                     createDirectoryIfMissing True (takeDirectory destPath)
-                    fileReadProgressWriter srcPath IO.stdout 60 (\_ -> prefix) (\_ -> "")
+                    fileReadProgressWriter srcPath IO.stdout 60 (ProgressBar.msg prefix) (ProgressBar.msg "")
                         <&> process
                         >>= BS.writeFile destPath
                     copyMetadata srcPath destPath

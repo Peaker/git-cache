@@ -8,7 +8,6 @@ module Opts
 
 import qualified Control.Lens as Lens
 import           Control.Lens.Operators
-import           Data.Semigroup ((<>))
 import qualified Options.Applicative as P
 
 newtype Load = Load

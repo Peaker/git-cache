@@ -30,8 +30,9 @@ executable git-cached-exec
                      , unix
                      , process
                      , lzma
-                     , bytestring-progress >= 1.2
+                     , bytestring-progress >= 1.4
                      , optparse-applicative
+                     , terminal-progress-bar
   hs-source-dirs:      src
   other-modules:       Files
                      , Git

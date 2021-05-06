@@ -1,5 +1,5 @@
-resolver: lts-11.8
+resolver: lts-17.10
 packages:
 - .
 extra-deps:
-- bytestring-progress-1.2
+- bytestring-progress-1.4
