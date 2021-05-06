@@ -29,7 +29,7 @@ executable git-cached-exec
                      , filepath
                      , unix
                      , process
-                     , lzma
+                     , lzma >= 0.0.0.4
                      , bytestring-progress >= 1.4
                      , optparse-applicative
                      , terminal-progress-bar

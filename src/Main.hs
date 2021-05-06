@@ -4,7 +4,7 @@ module Main
     ( main
     ) where
 
-import           Codec.Compression.Lzma (compress, decompress)
+import qualified Codec.Compression.Lzma as Lzma
 import qualified Control.Exception as E
 import qualified Control.Lens as Lens
 import           Control.Lens hiding ((<.>))
@@ -70,12 +70,15 @@ save dbPath preTreeHash m act =
                             putStrLn $ "Cleaning: " ++ path
                             removePathForcibly path
 
+compress :: BS.ByteString -> BS.ByteString
+compress = Lzma.compressWith Lzma.defaultCompressParams{Lzma.compressThreads = 4}
+
 restore :: Spec -> String -> IO ()
 restore spec treeHash =
     do
         compressed <- doesDirectoryExist compressedPath
         let (path, process)
-                | compressed = (compressedPath, decompress)
+                | compressed = (compressedPath, Lzma.decompress)
                 | otherwise = (cachePath dbPath treeHash, id)
         putStrLn $ "Restoring" ++ suffixMsg treeHash ++ ": (compressed=" ++
             show compressed ++ ", at " ++ path ++ ")"
